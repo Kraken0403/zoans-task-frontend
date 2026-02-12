@@ -10,24 +10,32 @@ definePageMeta({
 
 const auth = useAuthStore()
 
-const email = ref('')
+/* ================= STATE ================= */
+
+const identifier = ref('')
 const password = ref('')
 const loading = ref(false)
 
 const showError = ref(false)
 const errorMessage = ref('')
 
+/* ================= SUBMIT ================= */
+
 const submit = async () => {
   loading.value = true
   showError.value = false
 
   try {
-    const res = await login(email.value, password.value)
+    const res = await login(identifier.value, password.value)
+
     auth.setAuth(res)
-    navigateTo('/')
+
+    await navigateTo('/')
   } catch (e: any) {
     errorMessage.value =
-      e?.response?.data?.message || 'Invalid email or password'
+      e?.response?.data?.message ||
+      'Invalid username/email or password'
+
     showError.value = true
   } finally {
     loading.value = false
@@ -37,38 +45,60 @@ const submit = async () => {
 
 <template>
   <div class="min-h-screen flex items-center justify-center bg-[#F9FAFB]">
-    <div class="w-full max-w-md bg-white border border-[#DFE1E6] rounded-md p-6">
-      <h1 class="text-[18px] font-semibold text-[#172B4D] mb-6 text-center">
-        Sign in to Zoans
+    <div
+      class="w-full max-w-md bg-white border border-[#DFE1E6]
+             rounded-md p-6 shadow-sm"
+    >
+      <!-- Header -->
+      <h1
+        class="text-[20px] font-semibold text-[#172B4D]
+               mb-6 text-center"
+      >
+        Sign in
       </h1>
 
+      <!-- Form -->
       <form @submit.prevent="submit" class="space-y-4">
+
+        <!-- Email / Username -->
         <div>
-          <label class="block text-sm font-medium text-[#5E6C84] mb-1">
-            Email
+          <label
+            class="block text-sm font-medium text-[#5E6C84] mb-1"
+          >
+            Email or Username
           </label>
+
           <input
-            v-model="email"
-            type="email"
+            v-model="identifier"
+            type="text"
             required
+            placeholder="Enter email or username"
             class="w-full border border-[#DFE1E6] rounded-md px-3 py-2
-                   text-sm focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]"
+                   text-sm focus:outline-none focus:ring-2
+                   focus:ring-[#4C9AFF]"
           />
         </div>
 
+        <!-- Password -->
         <div>
-          <label class="block text-sm font-medium text-[#5E6C84] mb-1">
+          <label
+            class="block text-sm font-medium text-[#5E6C84] mb-1"
+          >
             Password
           </label>
+
           <input
             v-model="password"
             type="password"
             required
+            placeholder="Enter password"
             class="w-full border border-[#DFE1E6] rounded-md px-3 py-2
-                   text-sm focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]"
+                   text-sm focus:outline-none focus:ring-2
+                   focus:ring-[#4C9AFF]"
           />
         </div>
 
+        <!-- Submit -->
         <button
           type="submit"
           :disabled="loading"
@@ -78,10 +108,11 @@ const submit = async () => {
         >
           {{ loading ? 'Signing in…' : 'Sign in' }}
         </button>
+
       </form>
     </div>
 
-    <!-- Error Snackbar -->
+    <!-- Snackbar -->
     <NotificationSnackbar
       :show="showError"
       :message="errorMessage"

@@ -1,30 +1,40 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { onMounted, ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { getMyTasks, updateTask } from '@/services/task.service'
+import * as XLSX from 'xlsx'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
-definePageMeta({
-  middleware: 'auth',
-  title: 'My Tasks',
-})
+definePageMeta({ middleware: 'auth' })
+
+const router = useRouter()
 
 /* ================= STATE ================= */
 
 const tasks = ref<any[]>([])
+const selectedIds = ref<number[]>([])
 const loading = ref(true)
 
 const search = ref('')
-const statusFilter = ref<'ALL' | 'PENDING' | 'COMPLETED' | 'OVERDUE'>('ALL')
+const statusFilter = ref<'ALL' | 'PENDING' | 'COMPLETED' | 'INVOICED'>('ALL')
+const dueFilter = ref<'ALL' | 'OVERDUE' | 'UPCOMING'>('ALL')
+
+const currentPage = ref(1)
+const pageSize = 10
+
+const showConfirm = ref(false)
+const showActions = ref(false)
 
 const snackbar = ref({
   show: false,
   message: '',
-  type: 'success' as 'success' | 'error',
+  type: 'success',
 })
 
 /* ================= FETCH ================= */
 
-const fetchMyTasks = async () => {
+const fetchTasks = async () => {
   loading.value = true
   try {
     const { data } = await getMyTasks()
@@ -34,196 +44,402 @@ const fetchMyTasks = async () => {
   }
 }
 
-onMounted(fetchMyTasks)
+onMounted(fetchTasks)
+
+/* ================= SORT BY DUE DATE ================= */
+
+const sortedTasks = computed(() => {
+  return [...tasks.value].sort((a, b) => {
+    if (!a.dueDate) return 1
+    if (!b.dueDate) return -1
+    return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+  })
+})
 
 /* ================= FILTERING ================= */
 
 const filteredTasks = computed(() => {
-  let list = tasks.value
+  const now = new Date()
 
-  if (statusFilter.value !== 'ALL') {
-    list = list.filter(t => t.status === statusFilter.value)
-  }
-
-  if (search.value.trim()) {
-    const q = search.value.toLowerCase()
-    list = list.filter(t =>
-      [t.title, t.client?.name]
+  return sortedTasks.value.filter(t => {
+    const matchSearch =
+      !search.value ||
+      [
+        t.title,
+        t.client?.name,
+        t.taskMaster?.title,
+      ]
         .filter(Boolean)
-        .some(v => v.toLowerCase().includes(q))
-    )
-  }
+        .some(v =>
+          v.toLowerCase().includes(search.value.toLowerCase()),
+        )
 
-  return list
+    const matchStatus =
+      statusFilter.value === 'ALL' ||
+      t.status === statusFilter.value
+
+    const dueDate = t.dueDate ? new Date(t.dueDate) : null
+
+    const matchDue =
+      dueFilter.value === 'ALL' ||
+      (dueFilter.value === 'OVERDUE' && dueDate && dueDate < now) ||
+      (dueFilter.value === 'UPCOMING' && dueDate && dueDate >= now)
+
+    return matchSearch && matchStatus && matchDue
+  })
 })
 
-/* ================= ACTIONS ================= */
+/* ================= PAGINATION ================= */
 
-const changeStatus = async (task: any, status: string) => {
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTasks.value.length / pageSize)),
+)
+
+const paginatedTasks = computed(() => {
+  const start = (currentPage.value - 1) * pageSize
+  return filteredTasks.value.slice(start, start + pageSize)
+})
+
+watch([search, statusFilter, dueFilter], () => {
+  currentPage.value = 1
+})
+
+/* ================= SELECTION ================= */
+
+const toggleAll = (checked: boolean) => {
+  selectedIds.value = checked
+    ? paginatedTasks.value.map(t => t.id)
+    : []
+}
+
+const selectedTasks = computed(() =>
+  tasks.value.filter(t => selectedIds.value.includes(t.id)),
+)
+
+/* ================= VALIDATION ================= */
+
+const invoiceValidation = computed(() => {
+  if (!selectedTasks.value.length)
+    return { valid: false, reason: '' }
+
+  if (selectedTasks.value.some(t => t.status !== 'COMPLETED')) {
+    return {
+      valid: false,
+      reason: 'Only completed tasks can be invoiced',
+    }
+  }
+
+  if (selectedTasks.value.some(t => !t.isBillable)) {
+    return {
+      valid: false,
+      reason: 'Some selected tasks are not billable',
+    }
+  }
+
+  if (selectedTasks.value.some(t => t.status === 'INVOICED')) {
+    return {
+      valid: false,
+      reason: 'Some selected tasks already invoiced',
+    }
+  }
+
+  const clientIds = [
+    ...new Set(selectedTasks.value.map(t => t.client?.id)),
+  ]
+
+  if (clientIds.length !== 1) {
+    return {
+      valid: false,
+      reason: 'Tasks must belong to same client',
+    }
+  }
+
+  return { valid: true, reason: '' }
+})
+
+/* ================= MARK COMPLETE ================= */
+
+const markCompleted = async () => {
   try {
-    await updateTask(task.id, { status })
-    task.status = status
+    for (const id of selectedIds.value) {
+      await updateTask(id, { status: 'COMPLETED' })
+    }
 
     snackbar.value = {
       show: true,
-      message: 'Task status updated',
+      message: 'Tasks marked as completed',
       type: 'success',
     }
+
+    selectedIds.value = []
+    showConfirm.value = false
+    fetchTasks()
   } catch {
     snackbar.value = {
       show: true,
-      message: 'Failed to update task',
+      message: 'Failed to update tasks',
       type: 'error',
     }
   }
 }
 
+/* ================= EXPORT ================= */
+
+const exportSelected = () => {
+  const rows = selectedTasks.value.map(t => ({
+    Title: t.title,
+    Client: t.client?.name,
+    Status: t.status,
+    DueDate: t.dueDate
+      ? new Date(t.dueDate).toLocaleDateString()
+      : '',
+  }))
+
+  const ws = XLSX.utils.json_to_sheet(rows)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'My Tasks')
+  XLSX.writeFile(wb, 'my-tasks.xlsx')
+
+  showActions.value = false
+}
+
+/* ================= SEND TO INVOICE ================= */
+
+const sendToInvoice = () => {
+  if (!invoiceValidation.value.valid) {
+    snackbar.value = {
+      show: true,
+      message: invoiceValidation.value.reason,
+      type: 'error',
+    }
+    return
+  }
+
+  const clientId = selectedTasks.value[0].client.id
+
+  router.push({
+    path: '/invoices/create',
+    query: {
+      sourceType: 'TASKS',
+      clientId,
+      taskIds: JSON.stringify(selectedIds.value),
+    },
+  })
+}
+
 /* ================= HELPERS ================= */
 
 const statusClass = (status: string) => {
-  if (status === 'COMPLETED') return 'bg-green-100 text-green-700'
-  if (status === 'OVERDUE') return 'bg-red-100 text-red-700'
-  return 'bg-blue-100 text-blue-700'
+  if (status === 'COMPLETED') return 'bg-[#006644] text-white'
+  if (status === 'INVOICED') return 'bg-[#0052CC] text-white'
+  if (status === 'PENDING') return 'bg-[#DEEBFF] text-[#0747A6]'
+  return 'bg-[#DFE1E6] text-[#172B4D]'
 }
 
-const formatDate = (date?: string) => {
-  if (!date) return '—'
-  return new Date(date).toLocaleDateString()
-}
+const formatDate = (date?: string) =>
+  date ? new Date(date).toLocaleDateString() : '—'
 </script>
 
 <template>
-  <div class="p-6 bg-[#F9FAFB] min-h-screen">
-    <!-- Header -->
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-      <div>
-        <h1 class="text-[20px] font-semibold text-[#172B4D]">
-          My Tasks
-        </h1>
-        <p class="text-sm text-[#5E6C84]">
-          Tasks assigned to you
-        </p>
+    <div class="p-6 bg-[#F9FAFB] min-h-screen">
+  
+      <!-- ================= HEADER ================= -->
+      <div class="flex justify-between items-center mb-5">
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-[20px] font-semibold text-[#172B4D]">
+              My Tasks
+            </h1>
+            <span class="text-xs px-2 py-[2px] rounded-full bg-[#DFE1E6]">
+              {{ filteredTasks.length }}
+            </span>
+          </div>
+          <p class="text-sm text-[#5E6C84]">
+            Tasks assigned to you (sorted by earliest due date)
+          </p>
+        </div>
+  
+        <div class="flex items-center gap-2">
+          <input
+            v-model="search"
+            placeholder="Search tasks"
+            class="pl-3 pr-3 py-2 w-64 text-sm
+                   border border-[#DFE1E6] rounded-md"
+          />
+  
+          <!-- Actions Dropdown -->
+          <div class="relative">
+            <button
+              :disabled="!selectedIds.length"
+              @click.stop="showActions = !showActions"
+              class="flex items-center gap-2 px-3 py-2 text-sm bg-white
+                     border border-[#DFE1E6] rounded-md
+                     hover:bg-[#EBECF0] disabled:opacity-50"
+            >
+              Actions
+            </button>
+  
+            <div
+              v-if="showActions"
+              class="absolute right-0 mt-1 w-56 bg-white
+                     border border-[#DFE1E6] rounded-md shadow z-10"
+            >
+              <button
+                class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
+                @click="showConfirm = true"
+              >
+                Mark completed
+              </button>
+  
+              <button
+                class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
+                @click="exportSelected"
+              >
+                Export to Excel
+              </button>
+  
+              <button
+                class="w-full px-3 py-2 text-left text-sm
+                       hover:bg-[#F4F5F7]"
+                :class="invoiceValidation.valid
+                  ? 'text-[#0052CC]'
+                  : 'text-gray-400 cursor-not-allowed'"
+                :disabled="!invoiceValidation.valid"
+                @click="sendToInvoice"
+              >
+                Send to Invoice
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-
-      <!-- Filters -->
-      <div class="flex flex-wrap gap-2">
-        <input
-          v-model="search"
-          placeholder="Search tasks"
-          class="px-3 py-2 text-sm border rounded-md w-64"
-        />
-
-        <select
-          v-model="statusFilter"
-          class="px-3 py-2 text-sm border rounded-md"
-        >
-          <option value="ALL">All</option>
+  
+      <!-- ================= FILTERS ================= -->
+      <div class="flex gap-3 mb-4">
+        <select v-model="statusFilter" class="form-input w-40">
+          <option value="ALL">All Status</option>
           <option value="PENDING">Pending</option>
           <option value="COMPLETED">Completed</option>
+          <option value="INVOICED">Invoiced</option>
+        </select>
+  
+        <select v-model="dueFilter" class="form-input w-40">
+          <option value="ALL">All Due</option>
           <option value="OVERDUE">Overdue</option>
+          <option value="UPCOMING">Upcoming</option>
         </select>
       </div>
-    </div>
-
-    <!-- Loading -->
-    <div v-if="loading" class="text-center py-10 text-sm text-gray-500">
-      Loading tasks…
-    </div>
-
-    <!-- Empty -->
-    <div
-      v-else-if="!filteredTasks.length"
-      class="text-center py-10 text-sm text-gray-500"
-    >
-      No tasks found
-    </div>
-
-    <!-- Cards -->
-    <div
-      v-else
-      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
-    >
-      <div
-        v-for="task in filteredTasks"
-        :key="task.id"
-        class="bg-white border border-[#DFE1E6] rounded-md p-4
-               hover:shadow-sm transition"
-      >
-        <!-- Title -->
-        <div class="flex justify-between items-start mb-2">
-          <h3 class="font-medium text-[#172B4D]">
-            {{ task.title }}
-          </h3>
-
-          <span
-            class="text-xs px-2 py-[2px] rounded-full"
-            :class="statusClass(task.status)"
-          >
-            {{ task.status }}
-          </span>
-        </div>
-
-        <!-- Meta -->
-        <div class="text-sm text-[#5E6C84] space-y-1 mb-4">
-          <div>
-            <strong>Client:</strong>
-            {{ task.client?.name || '—' }}
-          </div>
-
-          <div>
-            <strong>Due:</strong>
-            {{ formatDate(task.dueDate) }}
-          </div>
-        </div>
-
-        <!-- Status Actions -->
+  
+      <!-- ================= TABLE ================= -->
+      <div class="bg-white border border-[#DFE1E6] rounded-md overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-[#F4F5F7] text-[#5E6C84]">
+            <tr>
+              <th class="px-4 py-3 w-10">
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.length === paginatedTasks.length && paginatedTasks.length"
+                  @change="toggleAll(($event.target as HTMLInputElement).checked)"
+                />
+              </th>
+              <th class="px-4 py-3 text-left">Title</th>
+              <th class="px-4 py-3 text-left">Client</th>
+              <th class="px-4 py-3 text-left">Task Master</th>
+              <th class="px-4 py-3 text-left">Due date</th>
+              <th class="px-4 py-3 text-left">Status</th>
+            </tr>
+          </thead>
+  
+          <tbody>
+            <tr
+              v-for="task in paginatedTasks"
+              :key="task.id"
+              class="border-t hover:bg-[#F9FAFB] cursor-pointer"
+              @click="router.push(`/tasks/${task.id}`)"
+            >
+              <td class="px-4 py-3" @click.stop>
+                <input
+                  type="checkbox"
+                  :value="task.id"
+                  v-model="selectedIds"
+                />
+              </td>
+  
+              <td class="px-4 py-3 font-medium text-[#172B4D]">
+                {{ task.title }}
+              </td>
+  
+              <td class="px-4 py-3 text-[#5E6C84]">
+                {{ task.client?.name || '-' }}
+              </td>
+  
+              <td class="px-4 py-3 text-[#5E6C84]">
+                {{ task.taskMaster?.title || '-' }}
+              </td>
+  
+              <td class="px-4 py-3 text-[#5E6C84]">
+                {{ formatDate(task.dueDate) }}
+              </td>
+  
+              <td class="px-4 py-3">
+                <span
+                  class="px-2 py-[2px] rounded-full text-xs font-medium"
+                  :class="statusClass(task.status)"
+                >
+                  {{ task.status }}
+                </span>
+              </td>
+            </tr>
+  
+            <tr v-if="!paginatedTasks.length && !loading">
+              <td colspan="6" class="text-center py-6 text-[#5E6C84]">
+                No tasks found
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+  
+      <!-- ================= PAGINATION ================= -->
+      <div class="flex justify-between px-4 py-4 text-sm">
+        <span>Page {{ currentPage }} of {{ totalPages }}</span>
+  
         <div class="flex gap-2">
           <button
-            v-if="task.status !== 'PENDING'"
-            class="btn-secondary text-xs"
-            @click="changeStatus(task, 'PENDING')"
+            @click="currentPage--"
+            :disabled="currentPage === 1"
+            class="px-3 py-1 border rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50"
           >
-            Mark Pending
+            Prev
           </button>
-
+  
           <button
-            v-if="task.status !== 'COMPLETED'"
-            class="btn-primary text-xs"
-            @click="changeStatus(task, 'COMPLETED')"
+            @click="currentPage++"
+            :disabled="currentPage === totalPages"
+            class="px-3 py-1 border rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50"
           >
-            Complete
+            Next
           </button>
         </div>
       </div>
+  
+      <!-- ================= CONFIRM ================= -->
+      <ConfirmDialog
+        v-if="showConfirm"
+        title="Complete Tasks"
+        message="Mark selected tasks as completed?"
+        confirmText="Complete"
+        @confirm="markCompleted"
+        @cancel="showConfirm = false"
+      />
+  
+      <!-- ================= SNACKBAR ================= -->
+      <NotificationSnackbar
+        v-bind="snackbar"
+        @close="snackbar.show = false"
+      />
     </div>
-
-    <NotificationSnackbar
-      v-bind="snackbar"
-      @close="snackbar.show = false"
-    />
-  </div>
-</template>
-
-<style scoped>
-.btn-primary {
-  background: #0052cc;
-  color: white;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-}
-.btn-primary:hover {
-  background: #0747a6;
-}
-
-.btn-secondary {
-  border: 1px solid #dfe1e6;
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  background: white;
-}
-.btn-secondary:hover {
-  background: #ebecf0;
-}
-</style>
+  </template>
+  

@@ -1,13 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '~/stores/auth'
 import ConfirmDialog from '~/components/ui/ConfirmDialog.vue'
 import NotificationSnackbar from '~/components/ui/NotificationSnackbar.vue'
 
 const auth = useAuthStore()
+const route = useRoute()
 
 const showConfirm = ref(false)
 const showSnackbar = ref(false)
+
+const showClientsDropdown = ref(
+  route.path.startsWith('/clients') ||
+  route.path.startsWith('/client-groups'),
+)
 
 const logout = () => {
   showConfirm.value = false
@@ -18,13 +25,19 @@ const logout = () => {
 
 <template>
   <aside class="w-64 bg-[#F4F5F7] border-r border-[#DFE1E6] flex flex-col">
+    
     <!-- Brand -->
-    <div class="px-4 py-3 text-[15px] font-semibold text-[#0052CC] border-b border-[#DFE1E6]">
-      Zoans Tasks
+    <div
+      class="px-4 py-3 text-[15px] font-semibold text-[#0052CC]
+             border-b border-[#DFE1E6]"
+    >
+      Task Management
     </div>
 
     <!-- Navigation -->
     <nav class="flex-1 px-2 py-3 space-y-1">
+
+      <!-- Dashboard -->
       <NuxtLink
         to="/"
         class="nav-item"
@@ -34,16 +47,55 @@ const logout = () => {
         <span>Dashboard</span>
       </NuxtLink>
 
+      <!-- CLIENTS DROPDOWN -->
+      <div>
+        <button
+          class="nav-item w-full justify-between"
+          @click="showClientsDropdown = !showClientsDropdown"
+        >
+          <div class="flex items-center gap-3">
+            <Icon name="mdi:account-multiple-outline" size="20" />
+            <span>Clients</span>
+          </div>
+          <Icon
+            :name="showClientsDropdown ? 'mdi:chevron-up' : 'mdi:chevron-down'"
+            size="18"
+          />
+        </button>
+
+        <div
+          v-if="showClientsDropdown"
+          class="ml-8 mt-1 space-y-1"
+        >
+          <NuxtLink
+            to="/clients"
+            class="submenu-item"
+            active-class="submenu-active"
+          >
+            All Clients
+          </NuxtLink>
+
+          <NuxtLink
+            to="/client-groups"
+            class="submenu-item"
+            active-class="submenu-active"
+          >
+            Client Groups
+          </NuxtLink>
+        </div>
+      </div>
+
+      <!-- Task Masters -->
       <NuxtLink
-        to="/clients"
+        to="/task-masters"
         class="nav-item"
         active-class="nav-item-active"
-        >
-        <Icon name="mdi:account-multiple-outline" size="20" />
-        <span>Clients</span>
-        </NuxtLink>
+      >
+        <Icon name="mdi:clipboard-flow-outline" size="20" />
+        <span>Task Masters</span>
+      </NuxtLink>
 
-
+      <!-- Tasks -->
       <NuxtLink
         to="/tasks"
         class="nav-item"
@@ -53,6 +105,7 @@ const logout = () => {
         <span>Tasks</span>
       </NuxtLink>
 
+      <!-- My Tasks -->
       <NuxtLink
         to="/me"
         class="nav-item"
@@ -62,15 +115,17 @@ const logout = () => {
         <span>My Tasks</span>
       </NuxtLink>
 
+      <!-- My Companies -->
       <NuxtLink
         to="/my-companies"
         class="nav-item"
         active-class="nav-item-active"
       >
-        <Icon name="mdi:settings-outline" size="20" />
+        <Icon name="mdi:office-building-outline" size="20" />
         <span>My Companies</span>
       </NuxtLink>
-      
+
+      <!-- Invoices -->
       <NuxtLink
         to="/invoices"
         class="nav-item"
@@ -79,6 +134,7 @@ const logout = () => {
         <Icon name="mdi:file-document-outline" size="20" />
         <span>Invoices</span>
       </NuxtLink>
+
     </nav>
 
     <!-- Logout -->
@@ -126,6 +182,24 @@ const logout = () => {
 }
 
 .nav-item-active {
+  background-color: #DEEBFF;
+  font-weight: 500;
+}
+
+.submenu-item {
+  display: block;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #172B4D;
+  transition: background-color 0.15s ease;
+}
+
+.submenu-item:hover {
+  background-color: #EBECF0;
+}
+
+.submenu-active {
   background-color: #DEEBFF;
   font-weight: 500;
 }

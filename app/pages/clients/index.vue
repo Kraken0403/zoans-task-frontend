@@ -6,12 +6,14 @@ import AddEditClientModal from '@/components/clients/AddEditClientModal.vue'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import * as XLSX from 'xlsx'
+import ImportClientsModal from '@/components/clients/ImportClientsModal.vue'
 
 const router = useRouter()
 
 const clients = ref<any[]>([])
 const selectedIds = ref<number[]>([])
 const loading = ref(true)
+const showImportModal = ref(false)
 
 const search = ref('')
 const currentPage = ref(1)
@@ -227,6 +229,13 @@ const closeModal = () => {
         >
           + Add Client
         </button>
+        <button
+          class="border px-4 py-2 rounded-md text-sm bg-white hover:bg-[#EBECF0]"
+          @click="showImportModal = true"
+        >
+          Import Excel
+        </button>
+
       </div>
     </div>
 
@@ -332,6 +341,18 @@ const closeModal = () => {
         snackbar.type = payload.type
       }"
     />
+
+    <ImportClientsModal
+      v-if="showImportModal"
+      @close="showImportModal = false"
+      @imported="fetchClients"
+      @notify="(p) => {
+        snackbar.show = true
+        snackbar.message = p.message
+        snackbar.type = p.type
+      }"
+    />
+
 
 
 

@@ -1,16 +1,32 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 import { createInvoice } from '@/services/invoices.service'
 import { getMyCompanies } from '@/services/my-companies.service'
 import { getClients } from '@/services/clients.service'
+import { getTasksByIds } from '@/services/task.service'
+
 
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 
 definePageMeta({ middleware: 'auth' })
 
 const router = useRouter()
+const route = useRoute()
+
+/* ================= QUERY ================= */
+
+const sourceType = route.query.sourceType as string | undefined
+const clientIdFromQuery = route.query.clientId
+  ? Number(route.query.clientId)
+  : null
+
+const taskIdsFromQuery = route.query.taskIds
+  ? JSON.parse(route.query.taskIds as string)
+  : []
+
+const isFromTasks = sourceType === 'TASKS'
 
 /* ================= DROPDOWN DATA ================= */
 
@@ -21,7 +37,7 @@ const clients = ref<any[]>([])
 
 const form = ref({
   fromCompanyId: null as number | null,
-  clientId: null as number | null,
+  clientId: clientIdFromQuery as number | null,
 
   gstPercent: 18,
   pricingMode: 'EXCLUSIVE',
@@ -38,15 +54,7 @@ const form = ref({
   igstAmount: 0,
   total: 0,
 
-  items: [
-    {
-      title: '',
-      description: '',
-      hsnSac: '',
-      quantity: 1,
-      unitPrice: 0,
-    },
-  ],
+  items: [] as any[],
 })
 
 /* ================= UI STATE ================= */
@@ -68,14 +76,45 @@ onMounted(async () => {
 
   companies.value = cRes.data
   clients.value = clRes.data
+
+  if (isFromTasks && taskIdsFromQuery.length) {
+    await populateFromTasks()
+  }
 })
 
-/* ================= ITEM HELPERS ================= */
+/* ================= POPULATE FROM TASKS ================= */
+
+const populateFromTasks = async () => {
+  if (!taskIdsFromQuery.length) return
+
+  const { data } = await getTasksByIds(taskIdsFromQuery)
+  console.log(data)
+
+  if (!data?.length) return
+
+  // Safety: filter only requested IDs (extra protection)
+  const filtered = data.filter((t: any) =>
+    taskIdsFromQuery.includes(t.id),
+  )
+
+  form.value.items = filtered.map((task: any) => ({
+    title: task.title,
+    description: task.description || '',
+    hsnSac: task.hsnSac || task.taskMaster?.hsnSac || '',
+    taskId: task.id,
+    quantity: 1,
+    unitPrice: task.unitPrice || 0,
+  }))
+
+  form.value.clientId = filtered[0].client.id
+}
+
+
+
+/* ================= CALCULATIONS ================= */
 
 const itemAmount = (item: any) =>
   Number(item.quantity || 0) * Number(item.unitPrice || 0)
-
-/* ================= CALCULATIONS ================= */
 
 const subtotal = computed(() =>
   form.value.items.reduce((sum, i) => sum + itemAmount(i), 0),
@@ -85,25 +124,17 @@ const gstAmount = computed(() =>
   (subtotal.value * Number(form.value.gstPercent || 0)) / 100,
 )
 
-const cgst = computed(() => gstAmount.value / 2)
-const sgst = computed(() => gstAmount.value / 2)
-
 const total = computed(() =>
   subtotal.value + gstAmount.value - Number(form.value.discount || 0),
 )
 
-/* ================= SYNC TO FORM ================= */
-
 watch(
   [subtotal, gstAmount, total],
   () => {
-    if (!form.value.isManualTotal) {
-      form.value.subtotal = Number(subtotal.value.toFixed(2))
-      form.value.cgstAmount = Number(cgst.value.toFixed(2))
-      form.value.sgstAmount = Number(sgst.value.toFixed(2))
-      form.value.igstAmount = 0
-      form.value.total = Number(total.value.toFixed(2))
-    }
+    form.value.subtotal = Number(subtotal.value.toFixed(2))
+    form.value.cgstAmount = Number((gstAmount.value / 2).toFixed(2))
+    form.value.sgstAmount = Number((gstAmount.value / 2).toFixed(2))
+    form.value.total = Number(total.value.toFixed(2))
   },
   { immediate: true },
 )
@@ -111,6 +142,7 @@ watch(
 /* ================= ACTIONS ================= */
 
 const addItem = () => {
+  if (isFromTasks) return
   form.value.items.push({
     title: '',
     description: '',
@@ -121,6 +153,7 @@ const addItem = () => {
 }
 
 const removeItem = (index: number) => {
+  if (isFromTasks) return
   form.value.items.splice(index, 1)
 }
 
@@ -136,15 +169,16 @@ const submit = async () => {
 
   try {
     loading.value = true
-    const invoice = await createInvoice(form.value)
 
-    if (!invoice?.id) {
-      throw new Error('Invoice created but ID missing')
+    const payload = {
+      ...form.value,
+      sourceType: isFromTasks ? 'TASKS' : 'MANUAL',
     }
+
+    const invoice = await createInvoice(payload)
 
     router.push(`/invoices/${invoice.id}`)
   } catch (err) {
-    console.error(err)
     snackbar.value = {
       show: true,
       message: 'Failed to create invoice',
@@ -154,7 +188,6 @@ const submit = async () => {
     loading.value = false
   }
 }
-
 </script>
 
 <template>
@@ -175,7 +208,12 @@ const submit = async () => {
   
         <div class="w-[50%]">
           <label class="field-label">Client <span class="text-red-600">*</span></label>
-          <select v-model="form.clientId" class="form-input cur">
+          <select
+            v-model="form.clientId"
+            class="form-input cur"
+            :disabled="isFromTasks"
+          >
+
             <option disabled value="">Select Client</option>
             <option v-for="c in clients" :key="c.id" :value="c.id">
               {{ c.name }}
@@ -196,13 +234,21 @@ const submit = async () => {
             <div class="">
                <h4 class="font-bold text-[#172B4D]">Item No: {{ i + 1 }}</h4>
             </div>
-            <button
+            <!-- <button
               v-if="form.items.length > 1"
               class="text-red-500 border-[1px] border-red-600 text-sm hover:underline bg-[#fff] rounded-[3px] p-[7px]"
               @click="removeItem(i)"
             >
               ✕ Remove
+            </button> -->
+            <button
+              class="text-red-500 border-[1px] border-red-600 text-sm hover:underline bg-[#fff] rounded-[3px] p-[7px]"
+              v-if="!isFromTasks && form.items.length > 1"
+              @click="removeItem(i)"
+            >
+              ✕ Remove
             </button>
+
           </div>
   
           <!-- Title + Description -->
