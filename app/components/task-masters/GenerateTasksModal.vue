@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { generateTasks, assignTaskMasterClients } from '@/services/task-masters.service'
 import { getUsers } from '@/services/users.service'
 import { getClients } from '@/services/clients.service'
@@ -25,11 +25,31 @@ const financialYear = ref('')
 const users = ref<any[]>([])
 const assignedToUserId = ref<number | null>(null)
 
+/* ---------------- BILLABLE ---------------- */
+const isBillable = ref(true)
+const hsnSac = ref('')
+const gstRate = ref<number | null>(null)
+const unitLabel = ref('')
+
 /* ---------------- FREQUENCY ---------------- */
 const frequency = computed(() => props.taskMaster.frequency)
 const isEvent = computed(() => frequency.value === 'EVENT_BASED')
 const isMonthly = computed(() => frequency.value === 'MONTHLY')
 const needsFinancialYear = computed(() => !isEvent.value && !isMonthly.value)
+
+/* ---------------- PREFILL BILLING ---------------- */
+watch(
+  () => props.taskMaster,
+  (m) => {
+    if (!m) return
+
+    isBillable.value = m.isBillable ?? true
+    hsnSac.value = m.hsnSac || ''
+    gstRate.value = m.gstRate ?? null
+    unitLabel.value = m.unitLabel || ''
+  },
+  { immediate: true }
+)
 
 /* ---------------- LOAD DATA ---------------- */
 onMounted(async () => {
@@ -43,7 +63,6 @@ onMounted(async () => {
     selectedClients.value =
       props.taskMaster.clients?.map((c: any) => c.id) || []
 
-    // Expand default group
     expandedGroups.value = ['All Clients']
 
   } catch {
@@ -52,7 +71,7 @@ onMounted(async () => {
   }
 })
 
-/* ---------------- SEARCH ONLY (NO GROUP DEPENDENCY) ---------------- */
+/* ---------------- SEARCH ---------------- */
 const filteredClients = computed(() => {
   const search = clientSearch.value.toLowerCase()
   return clients.value.filter(c =>
@@ -61,11 +80,8 @@ const filteredClients = computed(() => {
 })
 
 const toggleGroup = () => {
-  if (expandedGroups.value.includes('All Clients')) {
-    expandedGroups.value = []
-  } else {
-    expandedGroups.value = ['All Clients']
-  }
+  expandedGroups.value =
+    expandedGroups.value.includes('All Clients') ? [] : ['All Clients']
 }
 
 /* ---------------- SUBMIT ---------------- */
@@ -92,6 +108,15 @@ const submit = async () => {
     payload.assignedToUserId = assignedToUserId.value
   }
 
+  /* 🔥 BILLING PAYLOAD */
+  payload.isBillable = isBillable.value
+
+  if (isBillable.value) {
+    payload.hsnSac = hsnSac.value || undefined
+    payload.gstRate = gstRate.value || undefined
+    payload.unitLabel = unitLabel.value || undefined
+  }
+
   loading.value = true
 
   try {
@@ -108,6 +133,7 @@ const submit = async () => {
   }
 }
 </script>
+
 
 <template>
   <div class="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -203,6 +229,29 @@ const submit = async () => {
           </select>
         </div>
 
+      </div>
+
+      <!-- BILLABLE -->
+      <label class="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" v-model="isBillable" />
+        Billable
+      </label>
+
+      <div v-if="isBillable" class="grid grid-cols-3 gap-4">
+        <div>
+          <label class="label">HSN / SAC</label>
+          <input v-model="hsnSac" class="input" />
+        </div>
+
+        <div>
+          <label class="label">GST %</label>
+          <input type="number" v-model.number="gstRate" class="input" />
+        </div>
+
+        <div>
+          <label class="label">Unit</label>
+          <input v-model="unitLabel" class="input" />
+        </div>
       </div>
 
       <!-- FOOTER -->

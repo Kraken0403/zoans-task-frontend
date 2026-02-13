@@ -6,7 +6,7 @@ import {
   assignClients,
   removeClientsFromGroup,
 } from '@/services/clients-groups.service'
-import { getClients } from '@/services/clients.service'
+import { getClients, getUngroupedClients } from '@/services/clients.service'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 
 const route = useRoute()
@@ -33,7 +33,8 @@ const fetchData = async () => {
     const { data } = await getClientGroup(groupId)
     group.value = data
 
-    const res = await getClients()
+    const res = await getUngroupedClients()
+
     allClients.value = res.data
   } catch (err: any) {
     snackbar.value = {
@@ -53,12 +54,16 @@ onMounted(fetchData)
 const availableClients = computed(() => {
   if (!group.value) return []
 
-  const groupClientIds = group.value.clients.map((c: any) => c.id)
+  const currentGroupIds = group.value.clients.map((c: any) => c.id)
 
   return allClients.value.filter(
-    (client: any) => !groupClientIds.includes(client.id)
+    (client: any) =>
+      client.clientGroupId === null &&
+      !currentGroupIds.includes(client.id)
   )
 })
+
+
 
 /* ================= ASSIGN ================= */
 

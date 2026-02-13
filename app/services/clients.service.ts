@@ -29,6 +29,18 @@ export const deleteClient = (id: number) => {
    EXCEL IMPORT
 ====================== */
 
+export const getUngroupedClients = () => {
+  const { $api } = useNuxtApp()
+  return $api.get('/clients/ungrouped')
+}
+
+export const getAvailableClientsForGroup = (groupId: number) => {
+  const { $api } = useNuxtApp()
+  return $api.get(`/clients/available-for-group/${groupId}`)
+}
+
+
+
 export const importClientsExcel = (file: File) => {
   const { $api } = useNuxtApp()
 

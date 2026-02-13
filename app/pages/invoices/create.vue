@@ -282,11 +282,13 @@ const submit = async () => {
             </div>
   
             <div class="col-span-3">
-              <label class="field-label">Unit Price</label>
-              <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B778C]">
-                  ₹
+              <label class="field-label">Unit Price 
+                <span class="relative text-[#6B778C]">
+                 ( ₹ )
                 </span>
+              </label>
+              <div class="relative">
+
                 <input
                   type="number"
                   class="form-input pl-8"
@@ -328,11 +330,12 @@ const submit = async () => {
         </div> -->
   
         <div>
-          <label class="field-label">Discount</label>
-          <div class="relative">
-            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B778C]">
-              ₹
+          <label class="field-label">Discount
+            <span class="relative text-[#6B778C]">
+                ( ₹ )
             </span>
+          </label>
+          <div class="relative">
             <input
               class="form-input pl-8"
               type="number"

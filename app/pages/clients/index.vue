@@ -2,6 +2,7 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getClients, deleteClient } from '@/services/clients.service'
+import { getClientGroups } from '@/services/clients-groups.service'
 import AddEditClientModal from '@/components/clients/AddEditClientModal.vue'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -11,21 +12,25 @@ import ImportClientsModal from '@/components/clients/ImportClientsModal.vue'
 const router = useRouter()
 
 const clients = ref<any[]>([])
+const clientGroups = ref<any[]>([]) // ✅ STORE GROUPS
+
 const selectedIds = ref<number[]>([])
 const loading = ref(true)
 const showImportModal = ref(false)
 
 const search = ref('')
+const selectedGroupId = ref<number | null>(null)
+
 const currentPage = ref(1)
-const pageSize = 8
+const pageSize = 10
 
 const showModal = ref(false)
 const editClient = ref<any | null>(null)
 
 const showConfirm = ref(false)
 const showActionsMenu = ref(false)
-
-const clientCount = computed(() => clients.value.length)
+const singleDeleteId = ref<number | null>(null)
+const clientCount = computed(() => filteredClients.value.length)
 
 const snackbar = ref({
   show: false,
@@ -35,21 +40,45 @@ const snackbar = ref({
 
 /* ================= FETCH ================= */
 
-const fetchClients = async () => {
+const fetchData = async () => {
   loading.value = true
-  const { data } = await getClients()
-  clients.value = data
+
+  const [clientsRes, groupsRes] = await Promise.all([
+    getClients(),
+    getClientGroups(),
+  ])
+
+  clients.value = clientsRes.data
+  clientGroups.value = groupsRes.data
+
   loading.value = false
 }
 
-onMounted(fetchClients)
+onMounted(fetchData)
 
-/* ================= SEARCH + PAGINATION ================= */
+/* ================= GROUP HELPER ================= */
+
+const getGroupName = (groupId: number | null) => {
+  if (!groupId) return '-'
+  const group = clientGroups.value.find(g => g.id === groupId)
+  return group?.name || '-'
+}
+
+/* ================= FILTERING ================= */
 
 const filteredClients = computed(() => {
-  if (!search.value) return clients.value
+  let list = clients.value
+
+  if (selectedGroupId.value) {
+    list = list.filter(
+      c => c.clientGroupId === selectedGroupId.value // ✅ adjust if different FK name
+    )
+  }
+
+  if (!search.value) return list
+
   const q = search.value.toLowerCase()
-  return clients.value.filter(c =>
+  return list.filter(c =>
     [c.code, c.name, c.email, c.phone]
       .filter(Boolean)
       .some(v => v.toLowerCase().includes(q))
@@ -65,20 +94,15 @@ const paginatedClients = computed(() => {
   return filteredClients.value.slice(start, start + pageSize)
 })
 
-watch(search, () => (currentPage.value = 1))
+watch([search, selectedGroupId], () => (currentPage.value = 1))
 
-/* ================= SELECTION ================= */
-
-const toggleAll = (checked: boolean) => {
-  selectedIds.value = checked
-    ? paginatedClients.value.map(c => c.id)
-    : []
-}
-
-/* ================= ACTIONS ================= */
+/* ================= EXPORT ================= */
 
 const exportSelected = () => {
-  const rows = clients.value.filter(c => selectedIds.value.includes(c.id))
+  const rows = clients.value.filter(c =>
+    selectedIds.value.includes(c.id)
+  )
+
   if (!rows.length) return
 
   const sheet = XLSX.utils.json_to_sheet(
@@ -87,6 +111,7 @@ const exportSelected = () => {
       Name: c.name,
       Email: c.email,
       Phone: c.phone,
+      Group: getGroupName(c.clientGroupId), // ✅ mapped
     }))
   )
 
@@ -97,9 +122,20 @@ const exportSelected = () => {
   showActionsMenu.value = false
 }
 
+/* ================= DELETE ================= */
+
+const openSingleDelete = (id: number) => {
+  singleDeleteId.value = id
+  showConfirm.value = true
+}
+
 const confirmDelete = async () => {
-  for (const id of selectedIds.value) {
-    await deleteClient(id)
+  if (singleDeleteId.value) {
+    await deleteClient(singleDeleteId.value)
+  } else {
+    for (const id of selectedIds.value) {
+      await deleteClient(id)
+    }
   }
 
   snackbar.value = {
@@ -108,32 +144,21 @@ const confirmDelete = async () => {
     type: 'success',
   }
 
+  singleDeleteId.value = null
   selectedIds.value = []
   showConfirm.value = false
   showActionsMenu.value = false
-  fetchClients()
+
+  fetchData()
 }
 
-/* ================= CLICK OUTSIDE ================= */
-
-const closeActions = (e: MouseEvent) => {
-  const target = e.target as HTMLElement
-  if (!target.closest('.actions-menu')) {
-    showActionsMenu.value = false
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('click', closeActions)
-})
-
-/* ================= ROW NAVIGATION ================= */
+/* ================= NAVIGATION ================= */
 
 const goToClient = (id: number) => {
   router.push(`/clients/${id}`)
 }
 
-/* ================= MODAL HELPERS (FIX PARSER + PREFILL) ================= */
+/* ================= MODAL HELPERS ================= */
 
 const openAddClient = () => {
   editClient.value = null
@@ -141,7 +166,6 @@ const openAddClient = () => {
 }
 
 const openEditClient = (client: any) => {
-  // clone so modal edits don't instantly mutate table row
   editClient.value = { ...client }
   showModal.value = true
 }
@@ -151,6 +175,8 @@ const closeModal = () => {
   editClient.value = null
 }
 </script>
+
+
 
 <template>
   <div class="p-6 bg-[#F9FAFB] min-h-screen">
@@ -185,6 +211,33 @@ const closeModal = () => {
                    focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]"
           />
         </div>
+
+        <!-- Client Group Filter -->
+        <div class="relative w-44">
+          <select
+            v-model="selectedGroupId"
+            class="w-full appearance-none px-3 py-2 text-sm
+                  bg-white border border-[#DFE1E6] rounded-md
+                  hover:bg-[#EBECF0] focus:outline-none"
+          >
+            <option :value="null">All Groups</option>
+            <option
+              v-for="group in clientGroups"
+              :key="group.id"
+              :value="group.id"
+            >
+              {{ group.name }}
+            </option>
+          </select>
+
+          <Icon
+            name="mdi:chevron-down"
+            size="18"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-[#6B778C] pointer-events-none"
+          />
+        </div>
+
+
 
         <!-- Actions -->
         <div class="relative actions-menu">
@@ -249,53 +302,72 @@ const closeModal = () => {
             <th class="px-4 py-3 text-left">Name</th>
             <th class="px-4 py-3 text-left">Email</th>
             <th class="px-4 py-3 text-left">Phone</th>
-            <th class="px-4 py-3 text-right">Edit</th>
+            <th class="px-4 py-3 text-left">Group</th> <!-- ✅ ADDED -->
+            <th class="px-4 py-3 text-right">Actions</th>
           </tr>
+
         </thead>
 
         <tbody>
           <tr
-            v-for="client in paginatedClients"
-            :key="client.id"
-            class="border-t hover:bg-[#F9FAFB] cursor-pointer"
-            @click="goToClient(client.id)"
-          >
-            <!-- Checkbox -->
-            <td class="px-4 py-3" @click.stop>
-              <input
-                type="checkbox"
-                :value="client.id"
-                v-model="selectedIds"
-              />
-            </td>
+              v-for="client in paginatedClients"
+              :key="client.id"
+              class="border-t hover:bg-[#F9FAFB] cursor-pointer"
+            >
+              <td class="px-4 py-3" @click.stop>
+                <input
+                  type="checkbox"
+                  :value="client.id"
+                  v-model="selectedIds"
+                />
+              </td>
 
-            <td class="px-4 py-3 font-mono text-xs">
-              {{ client.code }}
-            </td>
+              <td class="px-4 py-3 font-mono text-xs">
+                {{ client.code }}
+              </td>
 
-            <td class="px-4 py-3 font-medium text-[#0052CC]">
-              {{ client.name }}
-            </td>
-
-            <td class="px-4 py-3 text-[#5E6C84]">
-              {{ client.email || '-' }}
-            </td>
-
-            <td class="px-4 py-3 text-[#5E6C84]">
-              {{ client.phone || '-' }}
-            </td>
-
-            <!-- Edit -->
-            <td class="px-4 py-3 text-right" @click.stop>
-              <button
-                class="inline-flex items-center gap-1 text-[#0052CC] hover:underline"
-                @click="openEditClient(client)"
+              <td
+                class="px-4 py-3 font-medium text-[#0052CC] cursor-pointer"
+                @click="goToClient(client.id)"
               >
-                <Icon name="mdi:pencil-outline" size="16" />
-                Edit
-              </button>
-            </td>
-          </tr>
+                {{ client.name }}
+              </td>
+
+              <td class="px-4 py-3 text-[#5E6C84]">
+                {{ client.email || '-' }}
+              </td>
+
+              <td class="px-4 py-3 text-[#5E6C84]">
+                {{ client.phone || '-' }}
+              </td>
+
+              <!-- Group Column -->
+              <td class="px-4 py-3 text-[#172B4D]">
+                {{ getGroupName(client.clientGroupId) }}
+              </td>
+
+              <!-- Actions -->
+              <td class="px-4 py-3 text-right" @click.stop>
+                <div class="flex justify-end gap-3">
+                  <button
+                    class="inline-flex items-center gap-1 text-[#0052CC] hover:underline"
+                    @click="openEditClient(client)"
+                  >
+                    <Icon name="mdi:pencil-outline" size="16" />
+                    Edit
+                  </button>
+
+                  <button
+                    class="inline-flex items-center gap-1 text-red-600 hover:underline"
+                    @click="openSingleDelete(client.id)"
+                  >
+                    <Icon name="mdi:delete-outline" size="16" />
+                    Delete
+                  </button>
+                </div>
+              </td>
+            </tr>
+
 
           <tr v-if="!paginatedClients.length && !loading">
             <td colspan="6" class="text-center py-6 text-[#5E6C84]">
@@ -353,15 +425,10 @@ const closeModal = () => {
       }"
     />
 
-
-
-
     <ConfirmDialog
-      v-if="showConfirm"
+      :show="showConfirm"
       title="Delete Clients"
       message="Are you sure you want to delete selected clients?"
-      confirmText="Delete"
-      type="danger"
       @confirm="confirmDelete"
       @cancel="showConfirm = false"
     />

@@ -17,11 +17,14 @@ const loading = ref(true)
 
 const search = ref('')
 const currentPage = ref(1)
-const pageSize = 8
+const pageSize = 10
 
 const showConfirm = ref(false)
 const showModal = ref(false)
+const showActionsMenu = ref(false)
+
 const editGroup = ref<any | null>(null)
+const singleDeleteId = ref<number | null>(null)
 
 const snackbar = ref({
   show: false,
@@ -91,10 +94,24 @@ const closeModal = () => {
 
 /* ================= DELETE ================= */
 
+const openSingleDelete = (id: number) => {
+  singleDeleteId.value = id
+  showConfirm.value = true
+}
+
+const openBulkDelete = () => {
+  singleDeleteId.value = null
+  showConfirm.value = true
+}
+
 const confirmDelete = async () => {
   try {
-    for (const id of selectedIds.value) {
-      await deleteClientGroup(id)
+    if (singleDeleteId.value) {
+      await deleteClientGroup(singleDeleteId.value)
+    } else {
+      for (const id of selectedIds.value) {
+        await deleteClientGroup(id)
+      }
     }
 
     snackbar.value = {
@@ -103,8 +120,11 @@ const confirmDelete = async () => {
       type: 'success',
     }
 
+    singleDeleteId.value = null
     selectedIds.value = []
     showConfirm.value = false
+    showActionsMenu.value = false
+
     fetchGroups()
   } catch (e: any) {
     snackbar.value = {
@@ -115,6 +135,21 @@ const confirmDelete = async () => {
   }
 }
 
+/* ================= CLICK OUTSIDE ================= */
+
+const closeActions = (e: MouseEvent) => {
+  const target = e.target as HTMLElement
+  if (!target.closest('.actions-menu')) {
+    showActionsMenu.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeActions)
+})
+
+/* ================= NAVIGATION ================= */
+
 const goToGroup = (id: number) => {
   router.push(`/client-groups/${id}`)
 }
@@ -122,6 +157,7 @@ const goToGroup = (id: number) => {
 
 <template>
   <div class="p-6 bg-[#F9FAFB] min-h-screen">
+
     <!-- Header -->
     <div class="flex justify-between items-center mb-5">
       <div class="flex items-center gap-2">
@@ -138,6 +174,8 @@ const goToGroup = (id: number) => {
       </div>
 
       <div class="flex items-center gap-2">
+
+        <!-- Search -->
         <input
           v-model="search"
           placeholder="Search groups"
@@ -146,6 +184,35 @@ const goToGroup = (id: number) => {
                  focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]"
         />
 
+        <!-- Actions Dropdown -->
+        <div class="relative actions-menu">
+          <button
+            :disabled="!selectedIds.length"
+            @click.stop="showActionsMenu = !showActionsMenu"
+            class="flex items-center gap-2 px-3 py-2 text-sm
+                   bg-white border border-[#DFE1E6] rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50"
+          >
+            Actions
+            <Icon name="mdi:chevron-down" size="18" />
+          </button>
+
+          <div
+            v-if="showActionsMenu"
+            class="absolute right-0 mt-1 w-44 bg-white
+                   border border-[#DFE1E6] rounded-md shadow z-10"
+          >
+            <button
+              class="w-full px-3 py-2 text-left text-sm text-red-600
+                     hover:bg-[#F4F5F7]"
+              @click="openBulkDelete"
+            >
+              Delete selected
+            </button>
+          </div>
+        </div>
+
+        <!-- Add Button -->
         <button
           class="bg-[#0052CC] text-white px-4 py-2 rounded-md
                  hover:bg-[#0747A6] text-sm"
@@ -165,7 +232,7 @@ const goToGroup = (id: number) => {
             <th class="px-4 py-3 text-left">Code</th>
             <th class="px-4 py-3 text-left">Name</th>
             <th class="px-4 py-3 text-left">Clients</th>
-            <th class="px-4 py-3 text-right">Edit</th>
+            <th class="px-4 py-3 text-right">Actions</th>
           </tr>
         </thead>
 
@@ -176,7 +243,6 @@ const goToGroup = (id: number) => {
             class="border-t hover:bg-[#F9FAFB] cursor-pointer"
             @click="goToGroup(group.id)"
           >
-            <!-- Checkbox -->
             <td class="px-4 py-3" @click.stop>
               <input
                 type="checkbox"
@@ -197,14 +263,22 @@ const goToGroup = (id: number) => {
               {{ group.clients?.length || 0 }}
             </td>
 
-            <!-- Edit Button -->
             <td class="px-4 py-3 text-right" @click.stop>
-              <button
-                class="inline-flex items-center gap-1 text-[#0052CC] hover:underline"
-                @click="openEditGroup(group)"
-              >
-                Edit
-              </button>
+              <div class="flex justify-end gap-3">
+                <button
+                  class="text-[#0052CC] hover:underline"
+                  @click="openEditGroup(group)"
+                >
+                  Edit
+                </button>
+
+                <button
+                  class="text-red-600 hover:underline"
+                  @click="openSingleDelete(group.id)"
+                >
+                  Delete
+                </button>
+              </div>
             </td>
           </tr>
 
@@ -248,13 +322,11 @@ const goToGroup = (id: number) => {
       @saved="fetchGroups"
     />
 
-    <!-- Delete Confirm -->
+    <!-- Confirm -->
     <ConfirmDialog
-      v-if="showConfirm"
+      :show="showConfirm"
       title="Delete Groups"
       message="Are you sure you want to delete selected groups?"
-      confirmText="Delete"
-      type="danger"
       @confirm="confirmDelete"
       @cancel="showConfirm = false"
     />
