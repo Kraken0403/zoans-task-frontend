@@ -229,30 +229,34 @@ const submit = async () => {
           </select>
         </div>
 
+        <div>
+                <!-- BILLABLE -->
+            <label class="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" v-model="isBillable" />
+              Billable
+            </label>
+
+            <div v-if="isBillable" class="grid grid-cols-3 gap-4">
+              <div>
+                <label class="label">HSN / SAC</label>
+                <input v-model="hsnSac" class="input" />
+              </div>
+
+              <div>
+                <label class="label">GST %</label>
+                <input type="number" v-model.number="gstRate" class="input" />
+              </div>
+
+              <div>
+                <label class="label">Unit</label>
+                <input v-model="unitLabel" class="input" />
+              </div>
+            </div>
+        </div>
+
       </div>
 
-      <!-- BILLABLE -->
-      <label class="flex items-center gap-2 text-sm font-medium">
-        <input type="checkbox" v-model="isBillable" />
-        Billable
-      </label>
 
-      <div v-if="isBillable" class="grid grid-cols-3 gap-4">
-        <div>
-          <label class="label">HSN / SAC</label>
-          <input v-model="hsnSac" class="input" />
-        </div>
-
-        <div>
-          <label class="label">GST %</label>
-          <input type="number" v-model.number="gstRate" class="input" />
-        </div>
-
-        <div>
-          <label class="label">Unit</label>
-          <input v-model="unitLabel" class="input" />
-        </div>
-      </div>
 
       <!-- FOOTER -->
       <div class="px-6 py-4 border-t flex justify-end gap-2 bg-[#FAFBFC]">
