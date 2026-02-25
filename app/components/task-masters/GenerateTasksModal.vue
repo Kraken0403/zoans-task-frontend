@@ -45,7 +45,12 @@ watch(
 
     isBillable.value = m.isBillable ?? true
     hsnSac.value = m.hsnSac || ''
-    gstRate.value = m.gstRate ?? null
+
+    gstRate.value =
+      m.gstRate !== undefined && m.gstRate !== null
+        ? Number(m.gstRate)
+        : null
+
     unitLabel.value = m.unitLabel || ''
   },
   { immediate: true }
@@ -113,7 +118,10 @@ const submit = async () => {
 
   if (isBillable.value) {
     payload.hsnSac = hsnSac.value || undefined
-    payload.gstRate = gstRate.value || undefined
+    payload.gstRate =
+    gstRate.value !== null && gstRate.value !== undefined
+      ? Number(gstRate.value)
+      : undefined
     payload.unitLabel = unitLabel.value || undefined
   }
 

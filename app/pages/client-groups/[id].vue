@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   getClientGroup,
   assignClients,
@@ -10,6 +10,7 @@ import { getClients, getUngroupedClients } from '@/services/clients.service'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 
 const route = useRoute()
+const router = useRouter()
 const groupId = Number(route.params.id)
 
 const group = ref<any>(null)

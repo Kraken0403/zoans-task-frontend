@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   getClientGroups,
   deleteClientGroup,
 } from '@/services/clients-groups.service'
+import { usePagination } from '@/composables/usePagination'
 import AddEditClientGroupModal from '@/components/clients/AddEditClientGroupModal.vue'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
+const route = useRoute()
 const router = useRouter()
 
 const groups = ref<any[]>([])
@@ -16,8 +18,6 @@ const selectedIds = ref<number[]>([])
 const loading = ref(true)
 
 const search = ref('')
-const currentPage = ref(1)
-const pageSize = 10
 
 const showConfirm = ref(false)
 const showModal = ref(false)
@@ -64,16 +64,20 @@ const filteredGroups = computed(() => {
   )
 })
 
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredGroups.value.length / pageSize))
-)
-
-const paginatedGroups = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredGroups.value.slice(start, start + pageSize)
+const {
+  currentPage,
+  totalPages,
+  startIndex,
+  endIndex
+} = usePagination({
+  totalItems: () => filteredGroups.value.length,
+  pageSize: 10,
+  resetDeps: [search]
 })
 
-watch(search, () => (currentPage.value = 1))
+const paginatedGroups = computed(() =>
+  filteredGroups.value.slice(startIndex.value, endIndex.value)
+)
 
 /* ================= MODAL HELPERS ================= */
 
@@ -125,7 +129,7 @@ const confirmDelete = async () => {
     showConfirm.value = false
     showActionsMenu.value = false
 
-    fetchGroups()
+    await fetchGroups()
   } catch (e: any) {
     snackbar.value = {
       show: true,
@@ -151,7 +155,10 @@ onMounted(() => {
 /* ================= NAVIGATION ================= */
 
 const goToGroup = (id: number) => {
-  router.push(`/client-groups/${id}`)
+  router.push({
+    path: `/client-groups/${id}`,
+    query: { page: currentPage.value }
+  })
 }
 </script>
 
@@ -295,7 +302,7 @@ const goToGroup = (id: number) => {
         <span>Page {{ currentPage }} of {{ totalPages }}</span>
         <div class="flex gap-2">
           <button
-            @click="currentPage--"
+            @click="currentPage = currentPage - 1"
             :disabled="currentPage === 1"
             class="px-3 py-1 border rounded-md
                    hover:bg-[#EBECF0] disabled:opacity-50"
@@ -303,7 +310,7 @@ const goToGroup = (id: number) => {
             Prev
           </button>
           <button
-            @click="currentPage++"
+            @click="currentPage  = currentPage + 1"
             :disabled="currentPage === totalPages"
             class="px-3 py-1 border rounded-md
                    hover:bg-[#EBECF0] disabled:opacity-50"

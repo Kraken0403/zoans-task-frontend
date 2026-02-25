@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { getClients, deleteClient } from '@/services/clients.service'
 import { getClientGroups } from '@/services/clients-groups.service'
+import { usePagination } from '@/composables/usePagination'
 import AddEditClientModal from '@/components/clients/AddEditClientModal.vue'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -10,6 +11,7 @@ import * as XLSX from 'xlsx'
 import ImportClientsModal from '@/components/clients/ImportClientsModal.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const clients = ref<any[]>([])
 const clientGroups = ref<any[]>([]) // ✅ STORE GROUPS
@@ -20,9 +22,6 @@ const showImportModal = ref(false)
 
 const search = ref('')
 const selectedGroupId = ref<number | null>(null)
-
-const currentPage = ref(1)
-const pageSize = 10
 
 const showModal = ref(false)
 const editClient = ref<any | null>(null)
@@ -85,17 +84,6 @@ const filteredClients = computed(() => {
   )
 })
 
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredClients.value.length / pageSize))
-)
-
-const paginatedClients = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredClients.value.slice(start, start + pageSize)
-})
-
-watch([search, selectedGroupId], () => (currentPage.value = 1))
-
 /* ================= EXPORT ================= */
 
 const exportSelected = () => {
@@ -154,8 +142,26 @@ const confirmDelete = async () => {
 
 /* ================= NAVIGATION ================= */
 
+const {
+  currentPage,
+  totalPages,
+  startIndex,
+  endIndex
+} = usePagination({
+  totalItems: () => filteredClients.value.length,
+  pageSize: 10,
+  resetDeps: [search, selectedGroupId]
+})
+
+const paginatedClients = computed(() =>
+  filteredClients.value.slice(startIndex.value, endIndex.value)
+)
+
 const goToClient = (id: number) => {
-  router.push(`/clients/${id}`)
+  router.push({
+    path: `/clients/${id}`,
+    query: { page: currentPage.value }
+  })
 }
 
 /* ================= MODAL HELPERS ================= */
@@ -187,10 +193,8 @@ const closeModal = () => {
           Clients
         </h1>
 
-        <span
-          class="text-xs px-2 py-[2px] rounded-full
-                 bg-[#DFE1E6] text-[#172B4D]"
-        >
+        <span class="text-xs px-2 py-[2px] rounded-full
+                 bg-[#DFE1E6] text-[#172B4D]">
           {{ clientCount }}
         </span>
       </div>
@@ -198,94 +202,57 @@ const closeModal = () => {
       <div class="flex items-center gap-2">
         <!-- Search -->
         <div class="relative">
-          <Icon
-            name="mdi:magnify"
-            size="18"
-            class="absolute left-2 top-1/2 -translate-y-1/2 text-[#6B778C]"
-          />
-          <input
-            v-model="search"
-            placeholder="Search clients"
-            class="pl-8 pr-3 py-2 w-64 text-sm
+          <Icon name="mdi:magnify" size="18" class="absolute left-2 top-1/2 -translate-y-1/2 text-[#6B778C]" />
+          <input v-model="search" placeholder="Search clients" class="pl-8 pr-3 py-2 w-64 text-sm
                    border border-[#DFE1E6] rounded-md
-                   focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]"
-          />
+                   focus:outline-none focus:ring-2 focus:ring-[#4C9AFF]" />
         </div>
 
         <!-- Client Group Filter -->
         <div class="relative w-44">
-          <select
-            v-model="selectedGroupId"
-            class="w-full appearance-none px-3 py-2 text-sm
+          <select v-model="selectedGroupId" class="w-full appearance-none px-3 py-2 text-sm
                   bg-white border border-[#DFE1E6] rounded-md
-                  hover:bg-[#EBECF0] focus:outline-none"
-          >
+                  hover:bg-[#EBECF0] focus:outline-none">
             <option :value="null">All Groups</option>
-            <option
-              v-for="group in clientGroups"
-              :key="group.id"
-              :value="group.id"
-            >
+            <option v-for="group in clientGroups" :key="group.id" :value="group.id">
               {{ group.name }}
             </option>
           </select>
 
-          <Icon
-            name="mdi:chevron-down"
-            size="18"
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-[#6B778C] pointer-events-none"
-          />
+          <Icon name="mdi:chevron-down" size="18"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-[#6B778C] pointer-events-none" />
         </div>
 
 
 
         <!-- Actions -->
         <div class="relative actions-menu">
-          <button
-            :disabled="!selectedIds.length"
-            @click.stop="showActionsMenu = !showActionsMenu"
-            class="flex items-center gap-2 px-3 py-2 text-sm
+          <button :disabled="!selectedIds.length" @click.stop="showActionsMenu = !showActionsMenu" class="flex items-center gap-2 px-3 py-2 text-sm
                    bg-white border border-[#DFE1E6] rounded-md
-                   hover:bg-[#EBECF0] disabled:opacity-50"
-          >
+                   hover:bg-[#EBECF0] disabled:opacity-50">
             Actions
             <Icon name="mdi:chevron-down" size="18" />
           </button>
 
-          <div
-            v-if="showActionsMenu"
-            class="absolute right-0 mt-1 w-44 bg-white
-                   border border-[#DFE1E6] rounded-md shadow z-10"
-          >
-            <button
-              class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
-              @click="exportSelected"
-            >
+          <div v-if="showActionsMenu" class="absolute right-0 mt-1 w-44 bg-white
+                   border border-[#DFE1E6] rounded-md shadow z-10">
+            <button class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]" @click="exportSelected">
               Export selected
             </button>
 
-            <button
-              class="w-full px-3 py-2 text-left text-sm text-red-600
-                     hover:bg-[#F4F5F7]"
-              @click="showConfirm = true"
-            >
+            <button class="w-full px-3 py-2 text-left text-sm text-red-600
+                     hover:bg-[#F4F5F7]" @click="showConfirm = true">
               Delete selected
             </button>
           </div>
         </div>
 
         <!-- Add -->
-        <button
-          class="bg-[#0052CC] text-white px-4 py-2 rounded-md
-                 hover:bg-[#0747A6] text-sm"
-          @click="openAddClient"
-        >
+        <button class="bg-[#0052CC] text-white px-4 py-2 rounded-md
+                 hover:bg-[#0747A6] text-sm" @click="openAddClient">
           + Add Client
         </button>
-        <button
-          class="border px-4 py-2 rounded-md text-sm bg-white hover:bg-[#EBECF0]"
-          @click="showImportModal = true"
-        >
+        <button class="border px-4 py-2 rounded-md text-sm bg-white hover:bg-[#EBECF0]" @click="showImportModal = true">
           Import Excel
         </button>
 
@@ -309,64 +276,49 @@ const closeModal = () => {
         </thead>
 
         <tbody>
-          <tr
-              v-for="client in paginatedClients"
-              :key="client.id"
-              class="border-t hover:bg-[#F9FAFB] cursor-pointer"
-            >
-              <td class="px-4 py-3" @click.stop>
-                <input
-                  type="checkbox"
-                  :value="client.id"
-                  v-model="selectedIds"
-                />
-              </td>
+          <tr v-for="client in paginatedClients" :key="client.id" class="border-t hover:bg-[#F9FAFB] cursor-pointer">
+            <td class="px-4 py-3" @click.stop>
+              <input type="checkbox" :value="client.id" v-model="selectedIds" />
+            </td>
 
-              <td class="px-4 py-3 font-mono text-xs">
-                {{ client.code }}
-              </td>
+            <td class="px-4 py-3 font-mono text-xs">
+              {{ client.code }}
+            </td>
 
-              <td
-                class="px-4 py-3 font-medium text-[#0052CC] cursor-pointer"
-                @click="goToClient(client.id)"
-              >
-                {{ client.name }}
-              </td>
+            <td class="px-4 py-3 font-medium text-[#0052CC] cursor-pointer" @click="goToClient(client.id)">
+              {{ client.name }}
+            </td>
 
-              <td class="px-4 py-3 text-[#5E6C84]">
-                {{ client.email || '-' }}
-              </td>
+            <td class="px-4 py-3 text-[#5E6C84]">
+              {{ client.email || '-' }}
+            </td>
 
-              <td class="px-4 py-3 text-[#5E6C84]">
-                {{ client.phone || '-' }}
-              </td>
+            <td class="px-4 py-3 text-[#5E6C84]">
+              {{ client.phone || '-' }}
+            </td>
 
-              <!-- Group Column -->
-              <td class="px-4 py-3 text-[#172B4D]">
-                {{ getGroupName(client.clientGroupId) }}
-              </td>
+            <!-- Group Column -->
+            <td class="px-4 py-3 text-[#172B4D]">
+              {{ getGroupName(client.clientGroupId) }}
+            </td>
 
-              <!-- Actions -->
-              <td class="px-4 py-3 text-right" @click.stop>
-                <div class="flex justify-end gap-3">
-                  <button
-                    class="inline-flex items-center gap-1 text-[#0052CC] hover:underline"
-                    @click="openEditClient(client)"
-                  >
-                    <Icon name="mdi:pencil-outline" size="16" />
-                    Edit
-                  </button>
+            <!-- Actions -->
+            <td class="px-4 py-3 text-right" @click.stop>
+              <div class="flex justify-end gap-3">
+                <button class="inline-flex items-center gap-1 text-[#0052CC] hover:underline"
+                  @click="openEditClient(client)">
+                  <Icon name="mdi:pencil-outline" size="16" />
+                  Edit
+                </button>
 
-                  <button
-                    class="inline-flex items-center gap-1 text-red-600 hover:underline"
-                    @click="openSingleDelete(client.id)"
-                  >
-                    <Icon name="mdi:delete-outline" size="16" />
-                    Delete
-                  </button>
-                </div>
-              </td>
-            </tr>
+                <button class="inline-flex items-center gap-1 text-red-600 hover:underline"
+                  @click="openSingleDelete(client.id)">
+                  <Icon name="mdi:delete-outline" size="16" />
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
 
 
           <tr v-if="!paginatedClients.length && !loading">
@@ -381,20 +333,12 @@ const closeModal = () => {
       <div class="flex justify-between px-4 py-3 border-t text-sm">
         <span>Page {{ currentPage }} of {{ totalPages }}</span>
         <div class="flex gap-2">
-          <button
-            @click="currentPage--"
-            :disabled="currentPage === 1"
-            class="px-3 py-1 border rounded-md
-                   hover:bg-[#EBECF0] disabled:opacity-50"
-          >
+          <button @click="currentPage = currentPage - 1" :disabled="currentPage === 1" class="px-3 py-1 border rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50">
             Prev
           </button>
-          <button
-            @click="currentPage++"
-            :disabled="currentPage === totalPages"
-            class="px-3 py-1 border rounded-md
-                   hover:bg-[#EBECF0] disabled:opacity-50"
-          >
+          <button @click="currentPage = currentPage + 1" :disabled="currentPage === totalPages" class="px-3 py-1 border rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50">
             Next
           </button>
         </div>
@@ -402,40 +346,22 @@ const closeModal = () => {
     </div>
 
     <!-- Modals -->
-    <AddEditClientModal
-      v-if="showModal"
-      :client="editClient"
-      @close="closeModal"
-      @saved="fetchClients"
-      @notify="(payload) => {
-        snackbar.show = true
-        snackbar.message = payload.message
-        snackbar.type = payload.type
-      }"
-    />
+    <AddEditClientModal v-if="showModal" :client="editClient" @close="closeModal" @saved="fetchData" @notify="(payload) => {
+      snackbar.show = true
+      snackbar.message = payload.message
+      snackbar.type = payload.type
+    }" />
 
-    <ImportClientsModal
-      v-if="showImportModal"
-      @close="showImportModal = false"
-      @imported="fetchClients"
-      @notify="(p) => {
-        snackbar.show = true
-        snackbar.message = p.message
-        snackbar.type = p.type
-      }"
-    />
+    <ImportClientsModal v-if="showImportModal" @close="showImportModal = false" @imported="fetchData" @notify="(p) => {
+      snackbar.show = true
+      snackbar.message = p.message
+      snackbar.type = p.type
+    }" />
 
-    <ConfirmDialog
-      :show="showConfirm"
-      title="Delete Clients"
-      message="Are you sure you want to delete selected clients?"
-      @confirm="confirmDelete"
-      @cancel="showConfirm = false"
-    />
+    <ConfirmDialog :show="showConfirm" title="Delete Clients"
+      message="Are you sure you want to delete selected clients?" @confirm="confirmDelete"
+      @cancel="showConfirm = false" />
 
-    <NotificationSnackbar
-      v-bind="snackbar"
-      @close="snackbar.show = false"
-    />
+    <NotificationSnackbar v-bind="snackbar" @close="snackbar.show = false" />
   </div>
 </template>

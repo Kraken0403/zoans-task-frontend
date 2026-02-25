@@ -73,7 +73,7 @@ const formatCurrency = (val: number) =>
       <div class="card">
         <p class="card-label text-[#0747A6]">Clients</p>
         <p class="card-value text-[#0747A6]">
-          {{ summary.myPendingCount }}
+          {{ summary.clientsCount }}
         </p>
       </div>
 

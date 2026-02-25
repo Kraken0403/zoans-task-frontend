@@ -139,13 +139,23 @@ const remove = async () => {
         </div>
 
         <div>
+          <span class="text-[#5E6C84]">MSME Number</span>
+          <div class="font-medium">{{ company.msmeNumber || '—' }}</div>
+        </div>
+
+        <div>
+          <span class="text-[#5E6C84]">MSME Category</span>
+          <div class="font-medium">{{ company.msmeCategory || '—' }}</div>
+        </div>
+
+        <div>
           <span class="text-[#5E6C84]">City</span>
           <div class="font-medium">{{ company.city || '—' }}</div>
         </div>
 
         <div>
           <span class="text-[#5E6C84]">State</span>
-          <div class="font-medium">{{ company.state || '—' }}</div>
+          <div class="font-medium">{{ company.state || '—' }} - {{ company.stateCode || "—" }}</div>
         </div>
 
         <div>
@@ -180,6 +190,11 @@ const remove = async () => {
           <div>
             <span class="text-[#5E6C84]">IFSC</span>
             <div class="font-medium">{{ company.bankIfsc || '—' }}</div>
+          </div>
+
+          <div>
+            <span class="text-[#5E6C84]">UPI ID</span>
+            <div class="font-medium">{{ company.upiId || '—' }}</div>
           </div>
 
           <div>

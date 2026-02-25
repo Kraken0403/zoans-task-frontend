@@ -10,10 +10,12 @@ export const getInvoiceById = (id: number) => {
   return $api.get(`/invoices/${id}`)
 }
 
-export const createInvoice = (payload: any) => {
+export const createInvoice = async (payload: any) => {
   const { $api } = useNuxtApp()
 
-  return $api.post('/invoices', payload).then(res => res.data)
+  const res = await $api.post('/invoices', payload)
+  console.log('Created Invoice:', res.data)
+  return res.data
 }
 export const addInvoiceItem = (invoiceId: number, payload: any) => {
   const { $api } = useNuxtApp()
@@ -28,6 +30,11 @@ export const recalculateInvoice = (invoiceId: number) => {
 export const sendInvoice = (invoiceId: number, payload: any) => {
   const { $api } = useNuxtApp()
   return $api.post(`/invoices/${invoiceId}/send`, payload)
+}
+
+export const deleteInvoice = (id: number) => {
+  const { $api } = useNuxtApp()
+  return $api.delete(`/invoices/${id}`)
 }
 
 /* ===========================

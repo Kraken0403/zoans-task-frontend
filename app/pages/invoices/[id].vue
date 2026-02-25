@@ -5,8 +5,10 @@ import {
   getInvoiceById,
   downloadInvoicePdf,
   updateInvoiceStatus,
+  deleteInvoice,
 } from '@/services/invoices.service'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 definePageMeta({ middleware: 'auth' })
 
@@ -15,6 +17,7 @@ const router = useRouter()
 
 const invoice = ref<any | null>(null)
 const loading = ref(true)
+const showDeleteConfirm = ref(false)
 
 const snackbar = ref({
   show: false,
@@ -66,6 +69,15 @@ const downloadPdf = async () => {
 const changeStatus = async (status: string) => {
   if (!invoice.value) return
 
+  if (invoice.value.deletedAt) {
+    snackbar.value = {
+      show: true,
+      message: 'Deleted invoice cannot be modified',
+      type: 'error',
+    }
+    return
+  }
+
   try {
     await updateInvoiceStatus(invoice.value.id, status)
     invoice.value.status = status
@@ -79,6 +91,30 @@ const changeStatus = async (status: string) => {
     snackbar.value = {
       show: true,
       message: 'Failed to update status',
+      type: 'error',
+    }
+  }
+}
+
+const removeInvoice = async () => {
+  if (!invoice.value) return
+
+  try {
+    await deleteInvoice(invoice.value.id)
+    showDeleteConfirm.value = false
+    snackbar.value = {
+      show: true,
+      message: 'Invoice deleted successfully',
+      type: 'success',
+    }
+
+    setTimeout(() => {
+      router.push('/invoices')
+    }, 600)
+  } catch {
+    snackbar.value = {
+      show: true,
+      message: 'Failed to delete invoice',
       type: 'error',
     }
   }
@@ -103,6 +139,9 @@ const changeStatus = async (status: string) => {
             Invoice {{ invoice.invoiceNumber }}
           </h1>
           <p class="text-sm text-gray-500">
+            Company: {{ invoice.fromCompanyName || '—' }}
+          </p>
+          <p class="text-sm text-gray-500">
             Client: {{ invoice.clientName || '—' }}
           </p>
         </div>
@@ -111,6 +150,7 @@ const changeStatus = async (status: string) => {
           <select
             class="border rounded px-2 py-1 text-sm"
             :value="invoice.status"
+            :disabled="!!invoice.deletedAt"
             @change="changeStatus(($event.target as HTMLSelectElement).value)"
           >
             <option value="DRAFT">Draft</option>
@@ -120,9 +160,18 @@ const changeStatus = async (status: string) => {
 
           <button
             class="px-3 py-2 bg-[#0052CC] text-white rounded text-sm"
+            :disabled="!!invoice.deletedAt"
             @click="downloadPdf"
           >
             Download PDF
+          </button>
+
+          <button
+            class="px-3 py-2 border border-red-600 text-red-600 rounded text-sm"
+            :disabled="!!invoice.deletedAt"
+            @click="showDeleteConfirm = true"
+          >
+            Delete
           </button>
         </div>
       </div>
@@ -136,9 +185,20 @@ const changeStatus = async (status: string) => {
         <div>
           <p><b>Total:</b> ₹{{ invoice.total }}</p>
           <p><b>Status:</b> {{ invoice.status }}</p>
+          <p v-if="invoice.deletedAt"><b>Deleted:</b> Yes</p>
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :show="showDeleteConfirm"
+      title="Delete Invoice"
+      message="Are you sure you want to delete this invoice?"
+      confirmText="Delete"
+      type="danger"
+      @confirm="removeInvoice"
+      @cancel="showDeleteConfirm = false"
+    />
 
     <NotificationSnackbar
       v-bind="snackbar"

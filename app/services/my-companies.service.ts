@@ -40,3 +40,10 @@ export const uploadCompanySignature = (id: number, file: File) => {
   fd.append('file', file)
   return $api.post(`/my-companies/${id}/signature`, fd)
 }
+
+export const uploadCompanyLogo = (id: number, file: File) => {
+  const { $api } = useNuxtApp()
+  const fd = new FormData()
+  fd.append('file', file)
+  return $api.post(`/my-companies/${id}/logo`, fd)
+}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter,useRoute } from 'vue-router'
 import { getMyTasks, updateTask } from '@/services/task.service'
 import * as XLSX from 'xlsx'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
@@ -9,6 +9,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 definePageMeta({ middleware: 'auth' })
 
 const router = useRouter()
+const route = useRoute()
 
 /* ================= STATE ================= */
 
@@ -19,9 +20,6 @@ const loading = ref(true)
 const search = ref('')
 const statusFilter = ref<'ALL' | 'PENDING' | 'COMPLETED' | 'INVOICED'>('ALL')
 const dueFilter = ref<'ALL' | 'OVERDUE' | 'UPCOMING'>('ALL')
-
-const currentPage = ref(1)
-const pageSize = 10
 
 const showConfirm = ref(false)
 const showActions = ref(false)
@@ -45,6 +43,12 @@ const fetchTasks = async () => {
 }
 
 onMounted(fetchTasks)
+
+const isInvoicedTask = (task: any) =>
+  Array.isArray(task.invoiceItems) && task.invoiceItems.length > 0
+
+const effectiveTaskStatus = (task: any) =>
+  isInvoicedTask(task) ? 'INVOICED' : task.status
 
 /* ================= SORT BY DUE DATE ================= */
 
@@ -76,7 +80,7 @@ const filteredTasks = computed(() => {
 
     const matchStatus =
       statusFilter.value === 'ALL' ||
-      t.status === statusFilter.value
+      effectiveTaskStatus(t) === statusFilter.value
 
     const dueDate = t.dueDate ? new Date(t.dueDate) : null
 
@@ -91,18 +95,20 @@ const filteredTasks = computed(() => {
 
 /* ================= PAGINATION ================= */
 
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredTasks.value.length / pageSize)),
+const {
+  currentPage,
+  totalPages,
+  startIndex,
+  endIndex
+} = usePagination({
+  totalItems: () => filteredTasks.value.length,
+  pageSize: 10,
+  resetDeps: [search, statusFilter, dueFilter]
+})
+
+const paginatedTasks = computed(() =>
+  filteredTasks.value.slice(startIndex.value, endIndex.value)
 )
-
-const paginatedTasks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredTasks.value.slice(start, start + pageSize)
-})
-
-watch([search, statusFilter, dueFilter], () => {
-  currentPage.value = 1
-})
 
 /* ================= SELECTION ================= */
 
@@ -136,7 +142,7 @@ const invoiceValidation = computed(() => {
     }
   }
 
-  if (selectedTasks.value.some(t => t.status === 'INVOICED')) {
+  if (selectedTasks.value.some(t => isInvoicedTask(t))) {
     return {
       valid: false,
       reason: 'Some selected tasks already invoiced',
@@ -189,7 +195,7 @@ const exportSelected = () => {
   const rows = selectedTasks.value.map(t => ({
     Title: t.title,
     Client: t.client?.name,
-    Status: t.status,
+    Status: effectiveTaskStatus(t),
     DueDate: t.dueDate
       ? new Date(t.dueDate).toLocaleDateString()
       : '',
@@ -355,7 +361,10 @@ const formatDate = (date?: string) =>
               v-for="task in paginatedTasks"
               :key="task.id"
               class="border-t hover:bg-[#F9FAFB] cursor-pointer"
-              @click="router.push(`/tasks/${task.id}`)"
+              @click="router.push({
+                path: `/tasks/${task.id}`,
+                query: {page : currentPage
+                }})"
             >
               <td class="px-4 py-3" @click.stop>
                 <input
@@ -384,9 +393,9 @@ const formatDate = (date?: string) =>
               <td class="px-4 py-3">
                 <span
                   class="px-2 py-[2px] rounded-full text-xs font-medium"
-                  :class="statusClass(task.status)"
+                  :class="statusClass(effectiveTaskStatus(task))"
                 >
-                  {{ task.status }}
+                  {{ effectiveTaskStatus(task) }}
                 </span>
               </td>
             </tr>
@@ -406,7 +415,7 @@ const formatDate = (date?: string) =>
   
         <div class="flex gap-2">
           <button
-            @click="currentPage--"
+            @click="currentPage = currentPage - 1"
             :disabled="currentPage === 1"
             class="px-3 py-1 border rounded-md
                    hover:bg-[#EBECF0] disabled:opacity-50"
@@ -415,7 +424,7 @@ const formatDate = (date?: string) =>
           </button>
   
           <button
-            @click="currentPage++"
+            @click="currentPage = currentPage + 1"
             :disabled="currentPage === totalPages"
             class="px-3 py-1 border rounded-md
                    hover:bg-[#EBECF0] disabled:opacity-50"

@@ -54,9 +54,19 @@ onMounted(async () => {
 const formatDate = (date?: string) =>
   date ? new Date(date).toLocaleDateString() : '—'
 
+const isInvoicedTask = () =>
+  Array.isArray(task.value?.invoiceItems) && task.value.invoiceItems.length > 0
+
+const effectiveTaskStatus = () =>
+  isInvoicedTask() ? 'INVOICED' : task.value?.status
+
 /* ================= EDIT ================= */
 
 const openEditModal = () => {
+  if (isInvoicedTask()) {
+    return
+  }
+
   editForm.value = {
     status: task.value.status,
     dueDate: task.value.dueDate
@@ -117,20 +127,23 @@ const saveTask = async () => {
             <span
               class="px-2 py-[2px] text-xs font-medium rounded-full"
               :class="
-                task.status === 'COMPLETED'
+                effectiveTaskStatus() === 'INVOICED'
+                  ? 'bg-[#0052CC] text-white'
+                  : effectiveTaskStatus() === 'COMPLETED'
                   ? 'bg-[#006644] text-white'
-                  : task.status === 'PENDING'
+                  : effectiveTaskStatus() === 'PENDING'
                   ? 'bg-[#DEEBFF] text-[#0747A6]'
                   : 'bg-[#DFE1E6] text-[#172B4D]'
               "
             >
-              {{ task.status }}
+              {{ effectiveTaskStatus() }}
             </span>
 
             <button
               @click="openEditModal"
+              :disabled="isInvoicedTask()"
               class="px-3 py-1.5 text-sm border rounded-md
-                     hover:bg-[#EBECF0]"
+                     hover:bg-[#EBECF0] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Edit
             </button>

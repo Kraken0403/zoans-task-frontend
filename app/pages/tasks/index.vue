@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { getTasks, updateTask } from '@/services/task.service'
+import { useRouter, useRoute } from 'vue-router'
+import {
+  getTasks,
+  updateTask,
+  deleteTask,
+  bulkDeleteTasks,
+} from '@/services/task.service'
 import * as XLSX from 'xlsx'
 import NotificationSnackbar from '@/components/ui/NotificationSnackbar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -9,6 +14,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 definePageMeta({ middleware: 'auth' })
 
 const router = useRouter()
+const route = useRoute()
 
 /* ================= STATE ================= */
 
@@ -17,14 +23,14 @@ const selectedIds = ref<number[]>([])
 const loading = ref(true)
 
 const search = ref('')
-const statusFilter = ref<'ALL' | 'PENDING' | 'COMPLETED'>('ALL')
+const statusFilter = ref<'ALL' | 'PENDING' | 'COMPLETED' | 'INVOICED'>('ALL')
 const dueFilter = ref<'ALL' | 'OVERDUE' | 'UPCOMING'>('ALL')
 
-const currentPage = ref(1)
-const pageSize = 10
+// const currentPage = ref(1)
+// const pageSize = 10
 
-const showConfirm = ref(false)
 const showActions = ref(false)
+const confirmType = ref<'complete' | 'delete' | null>(null)
 
 const snackbar = ref({
   show: false,
@@ -36,14 +42,23 @@ const snackbar = ref({
 
 const fetchTasks = async () => {
   loading.value = true
-  const { data } = await getTasks({})
-  tasks.value = data
-  loading.value = false
+  try {
+    const { data } = await getTasks({})
+    tasks.value = data
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(fetchTasks)
 
-/* ================= SORT BY DUE DATE ================= */
+const isInvoicedTask = (task: any) =>
+  Array.isArray(task.invoiceItems) && task.invoiceItems.length > 0
+
+const effectiveTaskStatus = (task: any) =>
+  isInvoicedTask(task) ? 'INVOICED' : task.status
+
+/* ================= SORT ================= */
 
 const sortedTasks = computed(() => {
   return [...tasks.value].sort((a, b) => {
@@ -53,7 +68,7 @@ const sortedTasks = computed(() => {
   })
 })
 
-/* ================= FILTERING ================= */
+/* ================= FILTER ================= */
 
 const filteredTasks = computed(() => {
   const now = new Date()
@@ -67,11 +82,13 @@ const filteredTasks = computed(() => {
         ...(t.assignments || []).map((a: any) => a.user?.name),
       ]
         .filter(Boolean)
-        .some(v => v.toLowerCase().includes(search.value.toLowerCase()))
+        .some(v =>
+          v.toLowerCase().includes(search.value.toLowerCase()),
+        )
 
     const matchStatus =
       statusFilter.value === 'ALL' ||
-      t.status === statusFilter.value
+      effectiveTaskStatus(t) === statusFilter.value
 
     const dueDate = t.dueDate ? new Date(t.dueDate) : null
 
@@ -86,23 +103,27 @@ const filteredTasks = computed(() => {
 
 /* ================= PAGINATION ================= */
 
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredTasks.value.length / pageSize)),
+const {
+  currentPage,
+  totalPages,
+  startIndex,
+  endIndex
+} = usePagination({
+  totalItems: () => filteredTasks.value.length,
+  pageSize: 10,
+  resetDeps: [search, statusFilter, dueFilter]
+})
+
+const paginatedTasks = computed(() =>
+  filteredTasks.value.slice(startIndex.value, endIndex.value)
 )
-
-const paginatedTasks = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredTasks.value.slice(start, start + pageSize)
-})
-
-watch([search, statusFilter, dueFilter], () => {
-  currentPage.value = 1
-})
 
 /* ================= SELECTION ================= */
 
 const toggleAll = (checked: boolean) => {
-  selectedIds.value = checked ? paginatedTasks.value.map(t => t.id) : []
+  selectedIds.value = checked
+    ? paginatedTasks.value.map(t => t.id)
+    : []
 }
 
 const selectedTasks = computed(() =>
@@ -112,35 +133,40 @@ const selectedTasks = computed(() =>
 /* ================= VALIDATION ================= */
 
 const invoiceValidation = computed(() => {
-  if (!selectedTasks.value.length) return { valid: false, reason: '' }
+  if (!selectedTasks.value.length)
+    return { valid: false, reason: '' }
 
-  // 1️⃣ All completed
-  if (selectedTasks.value.some(t => t.status !== 'COMPLETED')) {
-    return { valid: false, reason: 'Only completed tasks can be invoiced' }
-  }
+  if (selectedTasks.value.some(t => t.status !== 'COMPLETED'))
+    return {
+      valid: false,
+      reason: 'Only completed tasks can be invoiced',
+    }
 
-  // 2️⃣ All billable
-  if (selectedTasks.value.some(t => !t.isBillable)) {
-    return { valid: false, reason: 'Some selected tasks are not billable' }
-  }
+  if (selectedTasks.value.some(t => !t.isBillable))
+    return {
+      valid: false,
+      reason: 'Some selected tasks are not billable',
+    }
 
-  // 3️⃣ Not already invoiced
-  if (selectedTasks.value.some(t => t.status === 'INVOICED')) {
-    return { valid: false, reason: 'Some selected tasks already invoiced' }
-  }
+  if (selectedTasks.value.some(t => isInvoicedTask(t)))
+    return {
+      valid: false,
+      reason: 'Some selected tasks already invoiced',
+    }
 
-  // 4️⃣ Same client
   const clientIds = [
     ...new Set(selectedTasks.value.map(t => t.client?.id)),
   ]
-  if (clientIds.length !== 1) {
-    return { valid: false, reason: 'Tasks must belong to same client' }
-  }
+  if (clientIds.length !== 1)
+    return {
+      valid: false,
+      reason: 'Tasks must belong to same client',
+    }
 
   return { valid: true, reason: '' }
 })
 
-/* ================= MARK COMPLETE ================= */
+/* ================= COMPLETE ================= */
 
 const markCompleted = async () => {
   try {
@@ -155,12 +181,52 @@ const markCompleted = async () => {
     }
 
     selectedIds.value = []
-    showConfirm.value = false
+    confirmType.value = null
     fetchTasks()
   } catch {
     snackbar.value = {
       show: true,
       message: 'Failed to update tasks',
+      type: 'error',
+    }
+  }
+}
+
+/* ================= DELETE ================= */
+
+const deleteSelected = async () => {
+  try {
+    if (!selectedIds.value.length) return
+
+    if (selectedTasks.value.some(t => isInvoicedTask(t))) {
+      snackbar.value = {
+        show: true,
+        message: 'Invoiced tasks cannot be deleted',
+        type: 'error',
+      }
+      confirmType.value = null
+      return
+    }
+
+    if (selectedIds.value.length === 1) {
+      await deleteTask(selectedIds.value[0])
+    } else {
+      await bulkDeleteTasks(selectedIds.value)
+    }
+
+    snackbar.value = {
+      show: true,
+      message: 'Tasks deleted successfully',
+      type: 'success',
+    }
+
+    selectedIds.value = []
+    confirmType.value = null
+    fetchTasks()
+  } catch {
+    snackbar.value = {
+      show: true,
+      message: 'Failed to delete tasks',
       type: 'error',
     }
   }
@@ -186,7 +252,7 @@ const exportSelected = () => {
   showActions.value = false
 }
 
-/* ================= SEND TO INVOICE ================= */
+/* ================= INVOICE ================= */
 
 const sendToInvoice = () => {
   if (!invoiceValidation.value.valid) {
@@ -206,6 +272,7 @@ const sendToInvoice = () => {
       sourceType: 'TASKS',
       clientId,
       taskIds: JSON.stringify(selectedIds.value),
+      page: currentPage.value
     },
   })
 }
@@ -222,7 +289,6 @@ const statusClass = (status: string) => {
 const formatDate = (date?: string) =>
   date ? new Date(date).toLocaleDateString() : '—'
 </script>
-
 
 <template>
   <div class="p-6 bg-[#F9FAFB] min-h-screen">
@@ -244,58 +310,41 @@ const formatDate = (date?: string) =>
       </div>
 
       <div class="flex items-center gap-2">
-        <input
-          v-model="search"
-          placeholder="Search tasks"
-          class="pl-3 pr-3 py-2 w-64 text-sm
-                 border border-[#DFE1E6] rounded-md"
-        />
+        <input v-model="search" placeholder="Search tasks" class="pl-3 pr-3 py-2 w-64 text-sm
+                 border border-[#DFE1E6] rounded-md" />
 
-        <!-- Actions Dropdown -->
+        <!-- ================= ACTIONS DROPDOWN ================= -->
         <div class="relative">
-            <button
-              :disabled="!selectedIds.length"
-              @click.stop="showActions = !showActions"
-              class="flex items-center gap-2 px-3 py-2 text-sm bg-white
-                    border border-[#DFE1E6] rounded-md
-                    hover:bg-[#EBECF0] disabled:opacity-50"
-            >
-              Actions
+          <button :disabled="!selectedIds.length" @click.stop="showActions = !showActions" class="px-3 py-2 text-sm bg-white
+                   border border-[#DFE1E6] rounded-md
+                   hover:bg-[#EBECF0] disabled:opacity-50">
+            Actions
+          </button>
+
+          <div v-if="showActions" class="absolute right-0 mt-1 w-56 bg-white
+                   border border-[#DFE1E6] rounded-md shadow z-10">
+            <button class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
+              @click="confirmType = 'complete'; showActions = false">
+              Mark completed
             </button>
 
-            <div
-              v-if="showActions"
-              class="absolute right-0 mt-1 w-56 bg-white
-                    border border-[#DFE1E6] rounded-md shadow z-10"
-            >
-              <button
-                class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
-                @click="showConfirm = true"
-              >
-                Mark completed
-              </button>
+            <button class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]" @click="exportSelected">
+              Export to Excel
+            </button>
 
-              <button
-                class="w-full px-3 py-2 text-left text-sm hover:bg-[#F4F5F7]"
-                @click="exportSelected"
-              >
-                Export to Excel
-              </button>
+            <button class="w-full px-3 py-2 text-left text-sm
+                     hover:bg-[#F4F5F7]" :class="invoiceValidation.valid
+                      ? 'text-[#0052CC]'
+                      : 'text-gray-400 cursor-not-allowed'" :disabled="!invoiceValidation.valid" @click="sendToInvoice">
+              Send to Invoice
+            </button>
 
-              <button
-                class="w-full px-3 py-2 text-left text-sm
-                      hover:bg-[#F4F5F7]"
-                :class="invoiceValidation.valid
-                  ? 'text-[#0052CC]'
-                  : 'text-gray-400 cursor-not-allowed'"
-                :disabled="!invoiceValidation.valid"
-                @click="sendToInvoice"
-              >
-                Send to Invoice
-              </button>
-            </div>
+            <button class="w-full px-3 py-2 text-left text-sm
+                     text-[#DE350B] hover:bg-[#FDEDEA]" @click="confirmType = 'delete'; showActions = false">
+              Delete
+            </button>
           </div>
-
+        </div>
       </div>
     </div>
 
@@ -305,6 +354,7 @@ const formatDate = (date?: string) =>
         <option value="ALL">All Status</option>
         <option value="PENDING">Pending</option>
         <option value="COMPLETED">Completed</option>
+        <option value="INVOICED">Invoiced</option>
       </select>
 
       <select v-model="dueFilter" class="form-input w-40">
@@ -320,11 +370,8 @@ const formatDate = (date?: string) =>
         <thead class="bg-[#F4F5F7] text-[#5E6C84]">
           <tr>
             <th class="px-4 py-3 w-10">
-              <input
-                type="checkbox"
-                :checked="selectedIds.length === paginatedTasks.length && paginatedTasks.length"
-                @change="toggleAll(($event.target as HTMLInputElement).checked)"
-              />
+              <input type="checkbox" :checked="selectedIds.length === paginatedTasks.length && paginatedTasks.length"
+                @change="toggleAll(($event.target as HTMLInputElement).checked)" />
             </th>
             <th class="px-4 py-3 text-left">Title</th>
             <th class="px-4 py-3 text-left">Client</th>
@@ -335,18 +382,12 @@ const formatDate = (date?: string) =>
         </thead>
 
         <tbody>
-          <tr
-            v-for="task in paginatedTasks"
-            :key="task.id"
-            class="border-t hover:bg-[#F9FAFB] cursor-pointer"
-            @click="router.push(`/tasks/${task.id}`)"
-          >
+          <tr v-for="task in paginatedTasks" :key="task.id" class="border-t hover:bg-[#F9FAFB] cursor-pointer" @click="router.push({
+            path: `/tasks/${task.id}`,
+            query: { page: currentPage }
+          })">
             <td class="px-4 py-3" @click.stop>
-              <input
-                type="checkbox"
-                :value="task.id"
-                v-model="selectedIds"
-              />
+              <input type="checkbox" :value="task.id" v-model="selectedIds" />
             </td>
 
             <td class="px-4 py-3 font-medium text-[#172B4D]">
@@ -358,12 +399,8 @@ const formatDate = (date?: string) =>
             </td>
 
             <td class="px-4 py-3">
-              <span
-                v-for="a in task.assignments"
-                :key="a.user.id"
-                class="inline-block bg-[#DEEBFF] text-[#0747A6]
-                       text-xs px-2 py-[2px] rounded-full mr-1"
-              >
+              <span v-for="a in task.assignments" :key="a.user.id" class="inline-block bg-[#DEEBFF] text-[#0747A6]
+                       text-xs px-2 py-[2px] rounded-full mr-1">
                 {{ a.user.name }}
               </span>
               <span v-if="!task.assignments?.length">—</span>
@@ -374,11 +411,8 @@ const formatDate = (date?: string) =>
             </td>
 
             <td class="px-4 py-3">
-              <span
-                class="px-2 py-[2px] rounded-full text-xs font-medium"
-                :class="statusClass(task.status)"
-              >
-                {{ task.status }}
+              <span class="px-2 py-[2px] rounded-full text-xs font-medium" :class="statusClass(effectiveTaskStatus(task))">
+                {{ effectiveTaskStatus(task) }}
               </span>
             </td>
           </tr>
@@ -397,41 +431,30 @@ const formatDate = (date?: string) =>
       <span>Page {{ currentPage }} of {{ totalPages }}</span>
 
       <div class="flex gap-2">
-        <button
-          @click="currentPage--"
-          :disabled="currentPage === 1"
-          class="px-3 py-1 border rounded-md
-                 hover:bg-[#EBECF0] disabled:opacity-50"
-        >
+        <button @click="currentPage = currentPage - 1" :disabled="currentPage === 1" class="px-3 py-1 border rounded-md
+                 hover:bg-[#EBECF0] disabled:opacity-50">
           Prev
         </button>
 
-        <button
-          @click="currentPage++"
-          :disabled="currentPage === totalPages"
-          class="px-3 py-1 border rounded-md
-                 hover:bg-[#EBECF0] disabled:opacity-50"
-        >
+        <button @click="currentPage = currentPage + 1" :disabled="currentPage === totalPages" class="px-3 py-1 border rounded-md
+                 hover:bg-[#EBECF0] disabled:opacity-50">
           Next
         </button>
       </div>
     </div>
 
-    <!-- ================= CONFIRM ================= -->
-    <ConfirmDialog
-      v-if="showConfirm"
-      title="Complete Tasks"
-      message="Mark selected tasks as completed?"
-      confirmText="Complete"
-      @confirm="markCompleted"
-      @cancel="showConfirm = false"
-    />
+    <!-- ================= CONFIRM DIALOG ================= -->
+    <ConfirmDialog :show="!!confirmType" :title="confirmType === 'delete' ? 'Delete Tasks' : 'Complete Tasks'" :message="confirmType === 'delete'
+        ? 'Are you sure you want to delete selected tasks? This cannot be undone.'
+        : 'Mark selected tasks as completed?'
+      " :confirmText="confirmType === 'delete' ? 'Delete' : 'Complete'" @confirm="
+        confirmType === 'delete'
+          ? deleteSelected()
+          : markCompleted()
+        " @cancel="confirmType = null" />
 
     <!-- ================= SNACKBAR ================= -->
-    <NotificationSnackbar
-      v-bind="snackbar"
-      @close="snackbar.show = false"
-    />
+    <NotificationSnackbar v-bind="snackbar" @close="snackbar.show = false" />
+
   </div>
 </template>
-
